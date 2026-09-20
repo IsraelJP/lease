@@ -967,3 +967,40 @@ button:active:not(:disabled) { transform: scale(.96); }
     transition-duration: .01ms !important;
   }
 }
+
+/* Signed application updates */
+.update-toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 70;
+  width: min(430px,calc(100vw - 36px));
+  display: grid;
+  grid-template-columns: 46px minmax(0,1fr) auto;
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 19px;
+  color: var(--ink);
+  background: linear-gradient(135deg,var(--surface-glass-strong),color-mix(in srgb,var(--accent) 12%,var(--surface-glass)));
+  box-shadow: 0 22px 60px var(--shadow);
+  backdrop-filter: blur(26px) saturate(155%);
+  animation: view-enter 230ms cubic-bezier(.2,.75,.25,1) both;
+}
+.update-symbol { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; color: #fff; background: linear-gradient(135deg,var(--accent),var(--accent-pink)); box-shadow: 0 8px 20px color-mix(in srgb,var(--accent) 25%,transparent); font-size: 21px; font-weight: 800; }
+.update-copy { min-width: 0; display: grid; gap: 3px; }
+.update-copy > span { color: var(--accent-cyan); font-size: 8px; font-weight: 850; letter-spacing: .14em; }
+.update-copy strong { font-size: 14px; }
+.update-copy small { overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.update-actions { display: flex; gap: 5px; }
+.update-actions button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--surface-soft); font-size: 9px; font-weight: 750; }
+.update-actions .update-install { border: 0; color: #fff; background: linear-gradient(110deg,var(--accent),var(--accent-pink)); }
+.update-progress { overflow: hidden; height: 3px; margin-top: 5px; border-radius: 3px; background: var(--line); }
+.update-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--accent-cyan),var(--accent),var(--accent-pink)); transition: width 180ms ease; }
+
+@media (max-width: 620px) {
+  .update-toast { grid-template-columns: 40px minmax(0,1fr); }
+  .update-symbol { width: 40px; height: 40px; }
+  .update-actions { grid-column: 1/-1; justify-content: flex-end; }
+}

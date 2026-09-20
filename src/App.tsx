@@ -5,12 +5,15 @@ import {
   type CSSProperties,
   type DragEvent,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import {
   isPermissionGranted,
   requestPermission,
@@ -260,8 +263,12 @@ const LeaseApp = () => {
   const [isDeletingTask, setIsDeletingTask] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+  const [isInstallingUpdate, setIsInstallingUpdate] = useState(false);
   const scheduleScrollRef = useRef<HTMLDivElement>(null);
   const notifiedPlansRef = useRef(new Set<string>());
+  const dragPayloadRef = useRef<DragPayload | null>(null);
 
   async function loadDailyTasks() {
     setIsLoading(true);
@@ -355,7 +362,37 @@ const LeaseApp = () => {
   useEffect(() => {
     void loadDailyTasks();
     void loadCategories();
+    const updateTimer = window.setTimeout(async () => {
+      try {
+        setAvailableUpdate(await check({ timeout: 15_000 }));
+      } catch (updateError) {
+        console.info("No se pudo comprobar si hay actualizaciones", updateError);
+      }
+    }, 2_500);
+    return () => window.clearTimeout(updateTimer);
   }, []);
+
+  async function installAvailableUpdate() {
+    if (!availableUpdate || isInstallingUpdate) return;
+    setIsInstallingUpdate(true);
+    setUpdateProgress(0);
+    let downloaded = 0;
+    let total = 0;
+    try {
+      await availableUpdate.downloadAndInstall((event) => {
+        if (event.event === "Started") total = event.data.contentLength ?? 0;
+        if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+          setUpdateProgress(total > 0 ? Math.min(100, Math.round(downloaded / total * 100)) : null);
+        }
+        if (event.event === "Finished") setUpdateProgress(100);
+      });
+      await relaunch();
+    } catch (updateError) {
+      setError(`No se pudo instalar la actualización: ${errorMessage(updateError)}`);
+      setIsInstallingUpdate(false);
+    }
+  }
 
   useEffect(() => {
     if (page !== "today" || !scheduleScrollRef.current) return;
@@ -555,8 +592,10 @@ const LeaseApp = () => {
       id: task.id,
       duration: task.durationMinutes,
     };
+    dragPayloadRef.current = payload;
     event.dataTransfer.effectAllowed = "copy";
     event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    event.dataTransfer.setData("text/plain", JSON.stringify(payload));
   }
 
   function startDraggingPlan(event: DragEvent, plan: DailyPlan) {
@@ -565,16 +604,25 @@ const LeaseApp = () => {
       id: plan.id,
       duration: plan.endMinute - plan.startMinute,
     };
+    dragPayloadRef.current = payload;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    event.dataTransfer.setData("text/plain", JSON.stringify(payload));
   }
 
   async function dropOnHour(event: DragEvent<HTMLDivElement>, hour: number) {
     event.preventDefault();
-    const rawPayload = event.dataTransfer.getData("application/json");
-    if (!rawPayload) return;
-
-    const payload = JSON.parse(rawPayload) as DragPayload;
+    const rawPayload = event.dataTransfer.getData("application/json") || event.dataTransfer.getData("text/plain");
+    let payload = dragPayloadRef.current;
+    if (rawPayload) {
+      try {
+        payload = JSON.parse(rawPayload) as DragPayload;
+      } catch {
+        // WebView2 can strip custom drag formats; the in-memory payload remains available.
+      }
+    }
+    if (!payload) return;
+    dragPayloadRef.current = null;
     const bounds = event.currentTarget.getBoundingClientRect();
     const minute = event.clientY - bounds.top > bounds.height / 2 ? 30 : 0;
     const startMinute = hour * 60 + minute;
@@ -1002,6 +1050,22 @@ const LeaseApp = () => {
         </aside>
       )}
 
+      {availableUpdate && (
+        <div className="update-toast" role="dialog" aria-live="polite" aria-labelledby="update-title">
+          <div className="update-symbol">↻</div>
+          <div className="update-copy">
+            <span>NUEVA VERSIÓN</span>
+            <strong id="update-title">Lease {availableUpdate.version}</strong>
+            <small>{isInstallingUpdate ? updateProgress === null ? "Descargando actualización…" : `Descargando… ${updateProgress}%` : availableUpdate.body || "Incluye mejoras y correcciones."}</small>
+            {isInstallingUpdate && <div className="update-progress"><i style={{ width: `${updateProgress ?? 12}%` }} /></div>}
+          </div>
+          <div className="update-actions">
+            {!isInstallingUpdate && <button type="button" onClick={() => { void availableUpdate.close(); setAvailableUpdate(null); }}>Después</button>}
+            <button className="update-install" type="button" disabled={isInstallingUpdate} onClick={() => void installAvailableUpdate()}>{isInstallingUpdate ? "Instalando" : "Actualizar"}</button>
+          </div>
+        </div>
+      )}
+
       {alertsPanelOpen && (
         <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setAlertsPanelOpen(false); }}>
           <section className="alerts-panel" role="dialog" aria-modal="true" aria-labelledby="alerts-title">
@@ -1127,6 +1191,11 @@ const PomodoroPlayer = () => {
     });
   }
 
+  function startMovingPlayer(event: ReactMouseEvent<HTMLElement>) {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+    void getCurrentWindow().startDragging();
+  }
+
   async function toggleCompactPlayer() {
     const nextCompact = !compact;
     await getCurrentWindow().setSize(
@@ -1146,11 +1215,11 @@ const PomodoroPlayer = () => {
 
   return (
     <main className={`mini-pomodoro ${compact ? "compact" : "expanded"}`} data-task-color={taskColor} title={compact ? "Arrastra para mover · Doble clic para ampliar" : undefined}>
-      <header className="mini-player-titlebar" data-tauri-drag-region>
+      <header className="mini-player-titlebar" data-tauri-drag-region onMouseDown={startMovingPlayer}>
         <div data-tauri-drag-region><img src="/lease-logo.png" alt="" /><span data-tauri-drag-region>POMODORO</span></div>
         <div><button className={pinned ? "pin-button pinned" : "pin-button"} type="button" onClick={() => void togglePinnedPlayer()} aria-label={pinned ? "Desanclar ventana" : "Anclar siempre encima"} title={pinned ? "Desanclar" : "Mantener encima"}>◆</button><button type="button" onClick={() => void toggleCompactPlayer()} aria-label={compact ? "Abrir reproductor grande" : "Vista compacta"} title={compact ? "Abrir reproductor grande" : "Vista compacta"}>{compact ? "↗" : "↙"}</button><button type="button" onClick={() => void getCurrentWindow().minimize()} aria-label="Minimizar">−</button><button type="button" onClick={() => void getCurrentWindow().close()} aria-label="Cerrar">×</button></div>
       </header>
-      <section className="mini-player-content" data-tauri-drag-region={compact ? true : undefined} onDoubleClick={compact ? () => void toggleCompactPlayer() : undefined}>
+      <section className="mini-player-content" data-tauri-drag-region={compact ? true : undefined} onMouseDown={compact ? startMovingPlayer : undefined} onDoubleClick={compact ? () => void toggleCompactPlayer() : undefined}>
         <div className="mini-phase"><span>{phase === "focus" ? "● ENFOQUE" : "☕ DESCANSO"}</span><small>Ciclo {cycles + 1}</small></div>
         <h1>{taskName}</h1>
         <div className="mini-timer-ring" style={{ "--timer-progress": `${progress}deg` } as CSSProperties}>
