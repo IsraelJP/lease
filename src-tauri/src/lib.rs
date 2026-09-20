@@ -696,7 +696,22 @@ fn greet(name: &str) -> String {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let db = tauri::async_runtime::block_on(database::connection::connect())
+            let app_data_directory = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            std::fs::create_dir_all(&app_data_directory)?;
+            let database_path = app_data_directory.join("lease.db");
+
+            #[cfg(debug_assertions)]
+            if !database_path.exists() {
+                let legacy_database = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("lease-dev.db");
+                if legacy_database.is_file() {
+                    std::fs::copy(legacy_database, &database_path)?;
+                }
+            }
+
+            let db = tauri::async_runtime::block_on(database::connection::connect(&database_path))
                 .map_err(|error| std::io::Error::other(error.to_string()))?;
 
             app.manage(AppState { db });
