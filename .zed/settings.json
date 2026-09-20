@@ -1,0 +1,12 @@
+{
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "linkedProjects": [
+          "./src-tauri/Cargo.toml",
+          "./src-tauri/migration/Cargo.toml"
+        ]
+      }
+    }
+  }
+}
