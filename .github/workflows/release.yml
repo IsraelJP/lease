@@ -62,6 +62,6 @@ jobs:
             Primera versión de Lease.
 
             Descarga el instalador correspondiente a tu sistema operativo.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
